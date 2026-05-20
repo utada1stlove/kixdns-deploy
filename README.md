@@ -1,3 +1,4 @@
+```
 # ============================================================
 #  KixDNS 一键部署脚本
 #  https://github.com/olicesx/kixdns
@@ -7,7 +8,7 @@
 #    curl -fsSL https://raw.githubusercontent.com/utada1stlove/kixdns-deploy/refs/heads/main/deploy.sh \
 #      -o /tmp/kixdns.sh && bash /tmp/kixdns.sh
 # ============================================================
-
+```
 # KixDNS
 
 **[English](./README.md)** 
