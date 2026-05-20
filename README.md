@@ -10,7 +10,7 @@
 
 # KixDNS
 
-**[English](./README.md)** | **[简体中文](./README.zh-CN.md)**
+**[English](./README.md)** 
 
 A high-performance, non-recursive DNS forwarding server written in Rust, designed for low-latency, high-concurrency environments with flexible pipeline-based routing rules and hot-reloadable configuration.
 
