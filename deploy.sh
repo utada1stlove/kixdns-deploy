@@ -5,10 +5,10 @@ set -euo pipefail
 #  KixDNS 一键部署脚本
 #  https://github.com/olicesx/kixdns
 #  用法（交互式，推荐）:
-#    bash <(curl -fsSL https://raw.githubusercontent.com/<用户>/<仓库>/main/deploy.sh)
+#    bash <(curl -fsSL https://raw.githubusercontent.com/<用户>/kixdns-deploy/refs/heads/main/deploy.sh)
 #  或下载后执行:
-#    curl -fsSL https://raw.githubusercontent.com/<用户>/<仓库>/main/deploy.sh -o /tmp/kixdns.sh \
-#    && bash /tmp/kixdns.sh
+#    curl -fsSL https://raw.githubusercontent.com/<用户>/kixdns-deploy/refs/heads/main/deploy.sh \
+#      -o /tmp/kixdns.sh && bash /tmp/kixdns.sh
 # ============================================================
 
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'
@@ -57,7 +57,7 @@ done
 # ============================================================
 check_root() {
     if [ "$(id -u)" -ne 0 ]; then
-        fail "请以 root 运行: sudo bash <(curl -fsSL <URL>)"
+        fail "请以 root 运行: sudo bash <(curl -fsSL https://raw.githubusercontent.com/<用户>/kixdns-deploy/refs/heads/main/deploy.sh)"
     fi
 }
 
