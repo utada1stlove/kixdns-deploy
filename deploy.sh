@@ -5,9 +5,9 @@ set -euo pipefail
 #  KixDNS 一键部署脚本
 #  https://github.com/olicesx/kixdns
 #  用法（交互式，推荐）:
-#    bash <(curl -fsSL https://raw.githubusercontent.com/<用户>/kixdns-deploy/refs/heads/main/deploy.sh)
+#    bash <(curl -fsSL https://raw.githubusercontent.com/utada1stlove/kixdns-deploy/refs/heads/main/deploy.sh)
 #  或下载后执行:
-#    curl -fsSL https://raw.githubusercontent.com/<用户>/kixdns-deploy/refs/heads/main/deploy.sh \
+#    curl -fsSL https://raw.githubusercontent.com/utada1stlove/kixdns-deploy/refs/heads/main/deploy.sh \
 #      -o /tmp/kixdns.sh && bash /tmp/kixdns.sh
 # ============================================================
 
