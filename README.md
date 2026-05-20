@@ -1,0 +1,2 @@
+# kixdns-deploy
+deploy kixdns
