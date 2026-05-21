@@ -2,10 +2,14 @@
 set -euo pipefail
 
 # ============================================================
-#  KixDNS 一键部署脚本
+#  KixDNS 一键部署/卸载脚本
 #  https://github.com/olicesx/kixdns
-#  用法:
-#    sudo bash deploy.sh
+#  用法（CDN优先，直连兜底）:
+#    sudo bash <(curl -fsSL https://cdn.jsdelivr.net/gh/utada1stlove/kixdns-deploy@main/deploy.sh)
+#  或代理加速:
+#    sudo bash <(curl -fsSL https://mirror.ghproxy.com/https://raw.githubusercontent.com/utada1stlove/kixdns-deploy/refs/heads/main/deploy.sh)
+#  或 GitHub 直连:
+#    sudo bash <(curl -fsSL https://raw.githubusercontent.com/utada1stlove/kixdns-deploy/refs/heads/main/deploy.sh)
 # ============================================================
 
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'
