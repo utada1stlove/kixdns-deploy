@@ -3,13 +3,11 @@
 #  KixDNS 一键部署/卸载脚本
 #  https://github.com/olicesx/kixdns
 #  CDN（国内推荐）:
-#    sudo bash <(curl -fsSL https://cdn.jsdelivr.net/gh/utada1stlove/kixdns-deploy@main/deploy.sh)
+#    curl -fsSL https://cdn.jsdelivr.net/gh/utada1stlove/kixdns-deploy@main/deploy.sh -o /tmp/kixdns.sh && sudo bash /tmp/kixdns.sh
 #  代理加速:
-#    sudo bash <(curl -fsSL https://mirror.ghproxy.com/https://raw.githubusercontent.com/utada1stlove/kixdns-deploy/refs/heads/main/deploy.sh)
+#    curl -fsSL https://mirror.ghproxy.com/https://raw.githubusercontent.com/utada1stlove/kixdns-deploy/refs/heads/main/deploy.sh -o /tmp/kixdns.sh && sudo bash /tmp/kixdns.sh
 #  GitHub 直连:
-#    sudo bash <(curl -fsSL https://raw.githubusercontent.com/utada1stlove/kixdns-deploy/refs/heads/main/deploy.sh)
-#  或下载后执行:
-#    curl -fsSL <任一以上链接> -o /tmp/kixdns.sh && sudo bash /tmp/kixdns.sh
+#    curl -fsSL https://raw.githubusercontent.com/utada1stlove/kixdns-deploy/refs/heads/main/deploy.sh -o /tmp/kixdns.sh && sudo bash /tmp/kixdns.sh
 #  支持: 安装 / 卸载 / CDN镜像下载 / 多选DNS并发
 # ============================================================
 ```
@@ -73,17 +71,17 @@ A high-performance, non-recursive DNS forwarding server written in Rust, designe
 
 CDN（国内推荐）:
 ```bash
-sudo bash <(curl -fsSL https://cdn.jsdelivr.net/gh/utada1stlove/kixdns-deploy@main/deploy.sh)
+curl -fsSL https://cdn.jsdelivr.net/gh/utada1stlove/kixdns-deploy@main/deploy.sh -o /tmp/kixdns.sh && sudo bash /tmp/kixdns.sh
 ```
 
 代理加速:
 ```bash
-sudo bash <(curl -fsSL https://mirror.ghproxy.com/https://raw.githubusercontent.com/utada1stlove/kixdns-deploy/refs/heads/main/deploy.sh)
+curl -fsSL https://mirror.ghproxy.com/https://raw.githubusercontent.com/utada1stlove/kixdns-deploy/refs/heads/main/deploy.sh -o /tmp/kixdns.sh && sudo bash /tmp/kixdns.sh
 ```
 
 GitHub 直连:
 ```bash
-sudo bash <(curl -fsSL https://raw.githubusercontent.com/utada1stlove/kixdns-deploy/refs/heads/main/deploy.sh)
+curl -fsSL https://raw.githubusercontent.com/utada1stlove/kixdns-deploy/refs/heads/main/deploy.sh -o /tmp/kixdns.sh && sudo bash /tmp/kixdns.sh
 ```
 
 Interactive menu guides you through:
