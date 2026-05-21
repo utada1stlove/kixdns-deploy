@@ -1,12 +1,13 @@
 ```
 # ============================================================
-#  KixDNS 一键部署脚本
+#  KixDNS 一键部署/卸载脚本
 #  https://github.com/olicesx/kixdns
-#  用法（交互式，推荐）:
-#    bash <(curl -fsSL https://raw.githubusercontent.com/utada1stlove/kixdns-deploy/refs/heads/main/deploy.sh)
+#  用法:
+#    sudo bash <(curl -fsSL https://raw.githubusercontent.com/utada1stlove/kixdns-deploy/refs/heads/main/deploy.sh)
 #  或下载后执行:
 #    curl -fsSL https://raw.githubusercontent.com/utada1stlove/kixdns-deploy/refs/heads/main/deploy.sh \
-#      -o /tmp/kixdns.sh && bash /tmp/kixdns.sh
+#      -o /tmp/kixdns.sh && sudo bash /tmp/kixdns.sh
+#  支持: 安装 / 卸载 / CDN镜像下载 / 多选DNS并发
 # ============================================================
 ```
 # KixDNS
@@ -64,6 +65,16 @@ A high-performance, non-recursive DNS forwarding server written in Rust, designe
 - **Configurable flow control** — tune permit ranges and latency thresholds per deployment
 
 ## Quick Start
+
+### One-Click Deploy (Recommended)
+
+```bash
+sudo bash <(curl -fsSL https://raw.githubusercontent.com/utada1stlove/kixdns-deploy/refs/heads/main/deploy.sh)
+```
+
+Interactive menu guides you through:
+- **Install** — select region (China/Global), multi-select DNS upstreams, auto-download with CDN mirror, systemd setup
+- **Uninstall** — remove service, binary, and config
 
 ### Build
 
@@ -189,8 +200,8 @@ Configuration uses JSON format with the following top-level structure:
 | `domain_regex` | `value` | Match domain regex |
 | `qclass` | `value` | Match QCLASS (IN/CH/HS) |
 | `edns_present` | `expect` | Check EDNS presence (true/false) |
-| `geosite` | `value` | Match GeoSite category |
-| `geosite_not` | `value` | Negative GeoSite match |
+| `geo_site` | `value` | Match GeoSite category |
+| `geo_site_not` | `value` | Negative GeoSite match |
 | `any` | — | Match anything |
 
 #### Request Matchers
@@ -295,7 +306,7 @@ Matchers support logical composition:
       "id": "cn-domains",
       "rules": [{
         "name": "china-domains",
-        "matchers": [{ "type": "geosite", "value": "cn" }],
+        "matchers": [{ "type": "geo_site", "value": "cn" }],
         "actions": [{ "type": "forward", "upstream": "223.5.5.5:53" }]
       }]
     },
@@ -303,7 +314,7 @@ Matchers support logical composition:
       "id": "block-ads",
       "rules": [{
         "name": "ad-block",
-        "matchers": [{ "type": "geosite", "value": "category-ads" }],
+        "matchers": [{ "type": "geo_site", "value": "category-ads" }],
         "actions": [{ "type": "static_response", "rcode": "NXDOMAIN" }]
       }]
     }
