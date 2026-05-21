@@ -2,14 +2,10 @@
 set -euo pipefail
 
 # ============================================================
-#  KixDNS 一键部署/卸载脚本
+#  KixDNS 一键部署脚本
 #  https://github.com/olicesx/kixdns
-#  用法（CDN优先，直连兜底）:
-#    curl -fsSL https://cdn.jsdelivr.net/gh/utada1stlove/kixdns-deploy@main/deploy.sh -o /tmp/kixdns.sh && sudo bash /tmp/kixdns.sh
-#  或代理加速:
-#    curl -fsSL https://mirror.ghproxy.com/https://raw.githubusercontent.com/utada1stlove/kixdns-deploy/refs/heads/main/deploy.sh -o /tmp/kixdns.sh && sudo bash /tmp/kixdns.sh
-#  或 GitHub 直连:
-#    curl -fsSL https://raw.githubusercontent.com/utada1stlove/kixdns-deploy/refs/heads/main/deploy.sh -o /tmp/kixdns.sh && sudo bash /tmp/kixdns.sh
+#  用法:
+#    sudo bash deploy.sh
 # ============================================================
 
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'
@@ -362,7 +358,7 @@ generate_cn_config() {
         "matchers": [{ "type": "any" }],
         "actions": [
           { "type": "log", "level": "info" },
-          { "type": "static_ip_response", "rcode": "NOERROR", "ips": ["0.0.0.0", "::1"] }
+          { "type": "static_ip_response", "rcode": "NOERROR", "ip": "0.0.0.0" }
         ]
       }]
     },
@@ -381,7 +377,7 @@ generate_cn_config() {
           "name": "internal-wpad-sinkhole",
           "matchers": [{ "type": "domain_suffix", "value": ".wpad" }],
           "actions": [
-            { "type": "static_ip_response", "rcode": "NOERROR", "ips": ["127.0.0.1"] }
+            { "type": "static_ip_response", "rcode": "NOERROR", "ip": "127.0.0.1" }
           ]
         },
         {
@@ -624,7 +620,7 @@ generate_global_config() {
         "matchers": [{ "type": "any" }],
         "actions": [
           { "type": "log", "level": "info" },
-          { "type": "static_ip_response", "rcode": "NOERROR", "ips": ["0.0.0.0", "::1"] }
+          { "type": "static_ip_response", "rcode": "NOERROR", "ip": "0.0.0.0" }
         ]
       }]
     },
