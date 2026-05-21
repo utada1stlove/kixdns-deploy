@@ -1,0 +1,449 @@
+{
+  "version": "1.0",
+
+  "settings": {
+    "bind_udp": "127.0.0.1:44288",
+    "bind_tcp": "127.0.0.1:44288",
+
+    "min_ttl": 60,
+    "default_upstream": "1.1.1.1:53,1.0.0.1:53",
+    "upstream_timeout_ms": 3000,
+    "response_jump_limit": 12,
+
+    "cache_capacity": 50000,
+    "cache_max_ttl": 86400,
+    "cache_background_refresh": true,
+    "cache_refresh_threshold_percent": 15,
+    "cache_refresh_min_ttl": 10,
+    "serve_stale": true,
+    "serve_stale_ttl": 60,
+    "serve_stale_expire_ttl": 172800,
+    "serve_stale_ttl_reset": true,
+    "serve_stale_client_timeout_ms": 0,
+
+    "udp_pool_size": 128,
+    "tcp_pool_size": 64,
+    "doh_pool_size": 16,
+    "dot_pool_size": 32,
+    "doq_pool_size": 16,
+
+    "doq_enable_0rtt": true,
+    "doq_keepalive_interval_ms": 20000,
+    "doq_connection_idle_timeout_seconds": 90,
+
+    "flow_control_initial_permits": 500,
+    "flow_control_min_permits": 100,
+    "flow_control_max_permits": 1200,
+    "flow_control_latency_threshold_ms": 180,
+    "flow_control_adjustment_interval_secs": 5,
+
+    "geoip_db_path": "/etc/kixdns/GeoLite2-Country.mmdb",
+    "geoip_cache_capacity": 20000,
+    "geoip_cache_ttl": 3600,
+    "geosite_data_paths": ["/etc/kixdns/geosite.dat"]
+  },
+
+  "pipeline_select": [
+    {
+      "name": "内网标签分流",
+      "pipeline": "internal",
+      "matchers": [{ "type": "listener_label", "value": "edge-internal" }]
+    },
+    {
+      "name": "内网 IP 客户端（or 跨三个 CIDR）",
+      "pipeline": "internal",
+      "matchers": [
+        { "type": "client_ip", "cidr": "10.0.0.0/8" },
+        { "type": "client_ip", "cidr": "172.16.0.0/12", "operator": "or" },
+        { "type": "client_ip", "cidr": "192.168.0.0/16", "operator": "or" }
+      ]
+    },
+    {
+      "name": ".internal 后缀走内网",
+      "pipeline": "internal",
+      "matchers": [{ "type": "domain_suffix", "value": ".internal" }]
+    },
+    {
+      "name": "tracking 域名 sinkhole",
+      "pipeline": "sinkhole",
+      "matchers": [
+        { "type": "domain_regex", "value": "(?i)(^|\\.)(track(er|ing)?|analytics|pixel|beacon|collect|stats)\\.(com|io|net|org|cn)" }
+      ]
+    },
+    {
+      "name": "CHAOS 查询拒绝",
+      "pipeline": "chaos",
+      "matchers": [{ "type": "qclass", "value": "CH" }]
+    },
+    {
+      "name": "EDNS 客户端走增强管道",
+      "pipeline": "edns_enhanced",
+      "matchers": [{ "type": "edns_present", "expect": true }]
+    },
+    {
+      "name": "广告域名拦截",
+      "pipeline": "blocked",
+      "matchers": [{ "type": "geo_site", "value": "category-ads" }]
+    },
+    {
+      "name": "恶意域名拦截",
+      "pipeline": "blocked",
+      "matchers": [{ "type": "geo_site", "value": "malware" }]
+    },
+    {
+      "name": "国内域名走国内管道",
+      "pipeline": "china_dns",
+      "matchers": [{ "type": "geo_site", "value": "cn" }]
+    },
+    {
+      "name": "非 cn 域名走国际管道",
+      "pipeline": "international",
+      "matchers": [{ "type": "geo_site_not", "value": "cn" }]
+    },
+    {
+      "name": "兜底",
+      "pipeline": "default",
+      "matchers": [{ "type": "any" }]
+    }
+  ],
+
+  "pipelines": [
+    {
+      "id": "ipv6_off",
+      "rules": [{
+        "name": "AAAA 查询返回空 NOERROR",
+        "matchers": [{ "type": "any" }],
+        "actions": [
+          { "type": "log", "level": "debug", "message": "AAAA suppressed" },
+          { "type": "static_response", "rcode": "NOERROR" }
+        ]
+      }]
+    },
+
+    {
+      "id": "blocked",
+      "rules": [{
+        "name": "拦截广告/恶意域名",
+        "matchers": [{ "type": "any" }],
+        "actions": [
+          { "type": "log", "level": "warn", "message": "blocked" },
+          { "type": "static_response", "rcode": "NXDOMAIN" }
+        ]
+      }]
+    },
+
+    {
+      "id": "sinkhole",
+      "rules": [{
+        "name": "追踪域名黑洞",
+        "matchers": [{ "type": "any" }],
+        "actions": [
+          { "type": "log", "level": "info", "message": "sinkholed" },
+          { "type": "static_ip_response", "rcode": "NOERROR", "ips": ["0.0.0.0", "::1"] }
+        ]
+      }]
+    },
+
+    {
+      "id": "chaos",
+      "rules": [{
+        "name": "CHAOS 拒绝",
+        "matchers": [{ "type": "any" }],
+        "actions": [
+          { "type": "log", "level": "debug", "message": "CHAOS denied" },
+          { "type": "static_response", "rcode": "REFUSED" }
+        ]
+      }]
+    },
+
+    {
+      "id": "edns_enhanced",
+      "rules": [
+        {
+          "name": "AAAA 直接跳转 ipv6_off",
+          "matchers": [{ "type": "qtype", "value": "AAAA" }],
+          "actions": [{ "type": "jump_to_pipeline", "pipeline": "ipv6_off" }]
+        },
+        {
+          "name": "外网 EDNS 客户端走 Google DoH",
+          "_note": "and_not：edns_present=true 且 geoip_private=false",
+          "matchers": [
+            { "type": "edns_present", "expect": true },
+            { "type": "geoip_private", "expect": false, "operator": "and" }
+          ],
+          "actions": [
+            { "type": "forward", "upstream": "https://dns.google/dns-query" }
+          ],
+          "response_matchers": [
+            { "type": "response_rcode", "value": "NOERROR" },
+            { "type": "response_qclass", "value": "IN", "operator": "and" },
+            { "operator": "and_not", "type": "response_answer_ip", "cidr": "0.0.0.0/8,127.0.0.0/8,100.64.0.0/10,169.254.0.0/16" }
+          ],
+          "response_actions_on_match": [{ "type": "allow" }],
+          "response_actions_on_miss": [{ "type": "continue" }]
+        },
+        {
+          "name": "内网 EDNS 客户端走阿里 DoH",
+          "_note": "or：edns_present=false 或 geoip_private=true",
+          "matchers": [
+            { "type": "edns_present", "expect": false },
+            { "type": "geoip_private", "expect": true, "operator": "or" }
+          ],
+          "actions": [
+            { "type": "forward", "upstream": "https://223.5.5.5/dns-query" }
+          ],
+          "response_matchers": [
+            { "type": "response_rcode", "value": "NOERROR" },
+            { "operator": "or", "type": "response_rcode", "value": "NXDOMAIN" }
+          ],
+          "response_actions_on_match": [{ "type": "allow" }],
+          "response_actions_on_miss": [{ "type": "continue" }]
+        }
+      ]
+    },
+
+    {
+      "id": "internal",
+      "rules": [
+        {
+          "name": "AAAA 直接跳转 ipv6_off",
+          "matchers": [{ "type": "qtype", "value": "AAAA" }],
+          "actions": [{ "type": "jump_to_pipeline", "pipeline": "ipv6_off" }]
+        },
+        {
+          "name": "内网拒绝广告域名",
+          "matchers": [{ "type": "geo_site", "value": "category-ads" }],
+          "actions": [
+            { "type": "log", "level": "warn", "message": "internal ads denied" },
+            { "type": "deny" }
+          ]
+        },
+        {
+          "name": "WPAD sinkhole",
+          "matchers": [{ "type": "domain_suffix", "value": ".wpad" }],
+          "actions": [
+            { "type": "log", "level": "info", "message": "WPAD sinkholed" },
+            { "type": "static_ip_response", "rcode": "NOERROR", "ips": ["127.0.0.1"] }
+          ]
+        },
+        {
+          "name": "内网 TCP 转发 + 响应验证",
+          "matchers": [{ "type": "any" }],
+          "actions": [
+            { "type": "forward", "upstream": "tcp://10.0.0.53:53" }
+          ],
+          "response_matchers": [
+            { "type": "upstream_equals", "value": "10.0.0.53:53" },
+            { "type": "response_rcode", "value": "NOERROR", "operator": "and" }
+          ],
+          "response_actions_on_match": [{ "type": "allow" }],
+          "response_actions_on_miss": [
+            { "type": "log", "level": "warn", "message": "internal forward failed" },
+            { "type": "continue" }
+          ]
+        },
+        {
+          "name": "非 cn 域名回退默认",
+          "matchers": [{ "type": "geo_site_not", "value": "cn" }],
+          "actions": [{ "type": "forward", "upstream": null, "transport": "udp" }],
+          "response_matchers": [
+            { "type": "response_rcode", "value": "NOERROR" },
+            { "operator": "or", "type": "response_rcode", "value": "NXDOMAIN" }
+          ],
+          "response_actions_on_match": [{ "type": "allow" }],
+          "response_actions_on_miss": [{ "type": "continue" }]
+        }
+      ]
+    },
+
+    {
+      "id": "china_dns",
+      "rules": [
+        {
+          "name": "AAAA 直接跳转 ipv6_off",
+          "matchers": [{ "type": "qtype", "value": "AAAA" }],
+          "actions": [{ "type": "jump_to_pipeline", "pipeline": "ipv6_off" }]
+        },
+        {
+          "name": "阿里 DoQ + 腾讯 DNSPod DoH 竞速（国内主解析）",
+          "actions": [
+            {
+              "type": "forward",
+              "upstream": [
+                "doq://223.5.5.5:853?sni=dns.alidns.com",
+                "https://doh.pub/dns-query"
+              ]
+            }
+          ],
+          "response_matchers": [
+            { "type": "response_rcode", "value": "NOERROR" },
+            { "operator": "or", "type": "response_rcode", "value": "NXDOMAIN" }
+          ],
+          "response_actions_on_match": [{ "type": "allow" }],
+          "response_actions_on_miss": [{ "type": "continue" }]
+        },
+        {
+          "name": "阿里 DoH 回退 + DNS 污染检测",
+          "_note": "not 运算符：排除国内 DNS 污染特征 IP 段",
+          "matchers": [{ "type": "any" }],
+          "actions": [
+            { "type": "forward", "upstream": "https://223.5.5.5/dns-query" }
+          ],
+          "response_matchers": [
+            { "type": "response_rcode", "value": "NOERROR" },
+            {
+              "operator": "not",
+              "type": "response_answer_ip",
+              "cidr": "0.0.0.0/8,127.0.0.0/8,169.254.0.0/16,192.0.2.0/24,198.51.100.0/24,203.0.113.0/24"
+            },
+            { "operator": "and_not", "type": "response_answer_ip", "cidr": "100.64.0.0/10,255.255.255.255/32" }
+          ],
+          "response_actions_on_match": [{ "type": "allow" }],
+          "response_actions_on_miss": [{ "type": "continue" }]
+        },
+        {
+          "name": "污染后回退：Cloudflare DoH",
+          "matchers": [{ "type": "any" }],
+          "actions": [
+            { "type": "forward", "upstream": "https://cloudflare-dns.com/dns-query" }
+          ],
+          "response_matchers": [
+            { "type": "response_upstream_ip", "cidr": "1.1.1.1/32,1.0.0.1/32" },
+            { "type": "response_rcode", "value": "SERVFAIL", "operator": "or_not" },
+            { "type": "response_qclass", "value": "IN", "operator": "and" }
+          ],
+          "response_actions_on_match": [{ "type": "allow" }],
+          "response_actions_on_miss": [
+            { "type": "jump_to_pipeline", "pipeline": "default" }
+          ]
+        }
+      ]
+    },
+
+    {
+      "id": "international",
+      "rules": [
+        {
+          "name": "AAAA 直接跳转 ipv6_off",
+          "matchers": [{ "type": "qtype", "value": "AAAA" }],
+          "actions": [{ "type": "jump_to_pipeline", "pipeline": "ipv6_off" }]
+        },
+        {
+          "name": "国内 IP 客户访问国外域名走 Cloudflare DoH",
+          "matchers": [{ "type": "geoip_country", "country_codes": ["CN"] }],
+          "actions": [
+            { "type": "forward", "upstream": "https://cloudflare-dns.com/dns-query" }
+          ],
+          "response_matchers": [
+            { "type": "response_rcode", "value": "NOERROR" },
+            { "operator": "or", "type": "response_rcode", "value": "NXDOMAIN" }
+          ],
+          "response_actions_on_match": [{ "type": "allow" }],
+          "response_actions_on_miss": [{ "type": "continue" }]
+        },
+        {
+          "name": "Google DoH 回退",
+          "matchers": [{ "type": "any" }],
+          "actions": [
+            { "type": "forward", "upstream": "https://dns.google/dns-query" }
+          ],
+          "response_matchers": [
+            { "type": "response_rcode", "value": "NOERROR" },
+            { "operator": "or", "type": "response_rcode", "value": "NXDOMAIN" },
+            { "operator": "and_not", "type": "response_answer_ip", "cidr": "0.0.0.0/8,127.0.0.0/8,100.64.0.0/10" }
+          ],
+          "response_actions_on_match": [{ "type": "allow" }],
+          "response_actions_on_miss": [{ "type": "continue" }]
+        },
+        {
+          "name": "AdGuard DoQ 终极竞速",
+          "actions": [
+            {
+              "type": "forward",
+              "upstream": [
+                "doq://dns.adguard.com:8853?sni=dns.adguard.com",
+                "https://dns.google/dns-query"
+              ]
+            }
+          ],
+          "response_matchers": [
+            { "type": "response_rcode", "value": "NOERROR" },
+            { "operator": "or", "type": "response_rcode", "value": "NXDOMAIN" },
+            { "operator": "or", "type": "response_edns_present", "expect": true }
+          ],
+          "response_actions_on_match": [{ "type": "allow" }],
+          "response_actions_on_miss": [
+            { "type": "jump_to_pipeline", "pipeline": "default" }
+          ]
+        }
+      ]
+    },
+
+    {
+      "id": "default",
+      "rules": [
+        {
+          "name": "AAAA 直接跳转 ipv6_off",
+          "matchers": [{ "type": "qtype", "value": "AAAA" }],
+          "actions": [{ "type": "jump_to_pipeline", "pipeline": "ipv6_off" }]
+        },
+        {
+          "name": "国内 IP 或国内域名走阿里 DoH",
+          "matchers": [
+            { "type": "geoip_country", "country_codes": ["CN"] },
+            { "type": "geo_site", "value": "cn", "operator": "or" }
+          ],
+          "actions": [
+            { "type": "forward", "upstream": "https://223.5.5.5/dns-query" }
+          ],
+          "response_matchers": [
+            { "type": "response_rcode", "value": "NOERROR" },
+            { "operator": "or", "type": "response_rcode", "value": "NXDOMAIN" },
+            { "operator": "and_not", "type": "response_answer_ip", "cidr": "0.0.0.0/8,127.0.0.0/8,100.64.0.0/10,255.255.255.255/32" }
+          ],
+          "response_actions_on_match": [{ "type": "allow" }],
+          "response_actions_on_miss": [{ "type": "continue" }]
+        },
+        {
+          "name": "阿里 DoH 主查询 + 7 层 DNS 污染检测",
+          "matchers": [{ "type": "any" }],
+          "actions": [
+            { "type": "forward", "upstream": "https://223.5.5.5/dns-query" }
+          ],
+          "response_matchers": [
+            { "type": "response_rcode", "value": "NOERROR" },
+            {
+              "operator": "not",
+              "type": "response_answer_ip",
+              "cidr": "0.0.0.0/8,127.0.0.0/8,169.254.0.0/16,192.0.2.0/24,198.51.100.0/24,203.0.113.0/24,100.64.0.0/10,224.0.0.0/4,240.0.0.0/4"
+            }
+          ],
+          "response_actions_on_match": [{ "type": "allow" }],
+          "response_actions_on_miss": [{ "type": "continue" }]
+        },
+        {
+          "name": "检测到污染：DNSPod DoH + Cloudflare DoH 竞速回退",
+          "actions": [
+            {
+              "type": "forward",
+              "upstream": [
+                "https://doh.pub/dns-query",
+                "https://cloudflare-dns.com/dns-query"
+              ]
+            }
+          ],
+          "response_matchers": [
+            { "type": "response_upstream_ip", "cidr": "1.1.1.1/32,1.0.0.1/32,119.29.29.29/32" },
+            { "type": "response_rcode", "value": "NOERROR", "operator": "and" },
+            { "type": "response_qclass", "value": "IN", "operator": "and" }
+          ],
+          "response_actions_on_match": [{ "type": "allow" }],
+          "response_actions_on_miss": [
+            { "type": "log", "level": "warn", "message": "all upstreams failed" },
+            { "type": "static_response", "rcode": "SERVFAIL" }
+          ]
+        }
+      ]
+    }
+  ]
+}

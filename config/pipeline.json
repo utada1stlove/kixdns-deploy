@@ -1,0 +1,149 @@
+{
+  "version": "1.0",
+
+  "_comment": "=== 全局设置 ===",
+  "settings": {
+    "bind_udp": "0.0.0.0:5353",
+    "bind_tcp": "0.0.0.0:5353",
+    "default_upstream": "223.5.5.5:53",
+    "upstream_timeout_ms": 2000,
+    "min_ttl": 30,
+    "cache_capacity": 10000,
+    "cache_max_ttl": 86400,
+
+    "_transport_pools": "上游连接池大小",
+    "udp_pool_size": 64,
+    "tcp_pool_size": 64,
+    "doh_pool_size": 8,
+    "dot_pool_size": 64,
+    "doq_pool_size": 16,
+
+    "_geosite": "GeoSite 数据文件路径（需单独下载 geosite.dat）",
+    "geosite_data_paths": ["/etc/kixdns/geosite.dat"],
+
+    "_flow_control": "自适应流控",
+    "flow_control_initial_permits": 500,
+    "flow_control_min_permits": 100,
+    "flow_control_max_permits": 800,
+
+    "_serve_stale": "RFC 8767 过期缓存保护",
+    "serve_stale": false,
+    "serve_stale_ttl": 30,
+    "serve_stale_expire_ttl": 86400,
+
+    "_cache_refresh": "后台缓存刷新",
+    "cache_background_refresh": false,
+    "cache_refresh_threshold_percent": 10,
+
+    "_doq": "DNS-over-QUIC 设置",
+    "doq_enable_0rtt": true,
+    "doq_keepalive_interval_ms": 15000,
+    "doq_connection_idle_timeout_seconds": 60
+  },
+
+  "_comment_pipeline_select": "=== 管道选择规则 (pipeline_select) ===",
+  "_comment_pipeline_select_2": "按顺序匹配，命中的第一个规则决定进入哪个 pipeline",
+  "pipeline_select": [
+    {
+      "name": "block-ads",
+      "matchers": [{ "type": "geo_site", "value": "category-ads" }],
+      "pipeline": "blocked"
+    },
+    {
+      "name": "block-malware",
+      "matchers": [{ "type": "geo_site", "value": "malware" }],
+      "pipeline": "blocked"
+    },
+    {
+      "name": "cn-domains-doh",
+      "matchers": [{ "type": "geo_site", "value": "cn" }],
+      "pipeline": "china-doh"
+    },
+    {
+      "name": "google-services-trusted",
+      "matchers": [{ "type": "geo_site", "value": "google" }],
+      "pipeline": "trusted-dot"
+    },
+    {
+      "name": "catch-all-default",
+      "matchers": [{ "type": "any" }],
+      "pipeline": "default"
+    }
+  ],
+
+  "_comment_pipelines": "=== 管道定义 (pipelines) ===",
+  "pipelines": [
+    {
+      "id": "blocked",
+      "_comment": "拦截广告/恶意域名，返回 NXDOMAIN",
+      "rules": [
+        {
+          "name": "block-with-log",
+          "matchers": [{ "type": "any" }],
+          "actions": [
+            { "type": "log", "level": "warn", "message": "blocked: {domain}" },
+            { "type": "static_response", "rcode": "NXDOMAIN" }
+          ]
+        }
+      ]
+    },
+
+    {
+      "id": "china-doh",
+      "_comment": "国内域名通过阿里 DoH 解析",
+      "rules": [
+        {
+          "name": "alidns-doh",
+          "matchers": [{ "type": "any" }],
+          "actions": [
+            {
+              "type": "forward",
+              "upstream": "https://dns.alidns.com/dns-query",
+              "transport": "doh"
+            }
+          ]
+        }
+      ]
+    },
+
+    {
+      "id": "trusted-dot",
+      "_comment": "可信域名通过 Quad9 DoT 解析（加密传输防劫持）",
+      "rules": [
+        {
+          "name": "quad9-dot",
+          "matchers": [{ "type": "any" }],
+          "actions": [
+            {
+              "type": "forward",
+              "upstream": "dns.quad9.net:853",
+              "transport": "dot"
+            }
+          ]
+        }
+      ]
+    },
+
+    {
+      "id": "default",
+      "_comment": "默认管道：UDP 转发，带 DNS 污染检测和 TCP 回退",
+      "rules": [
+        {
+          "name": "check-pollution",
+          "_comment": "先用 UDP 查询，如果返回了 127.0.0.0/8 的污染 IP 则继续下一条规则",
+          "matchers": [{ "type": "any" }],
+          "actions": [{ "type": "forward", "upstream": "223.5.5.5:53", "transport": "udp" }],
+          "response_matchers": [{ "type": "response_answer_ip", "cidr": "127.0.0.0/8,0.0.0.0/8" }],
+          "response_actions_on_match": [{ "type": "continue" }],
+          "response_actions_on_miss": [{ "type": "allow" }]
+        },
+        {
+          "name": "fallback-tcp-google",
+          "_comment": "检测到污染后改用 TCP 查询 Google DNS",
+          "matchers": [{ "type": "any" }],
+          "actions": [{ "type": "forward", "upstream": "8.8.8.8:53", "transport": "tcp" }]
+        }
+      ]
+    }
+  ]
+}

@@ -4,11 +4,8 @@ set -euo pipefail
 # ============================================================
 #  KixDNS 一键部署脚本
 #  https://github.com/olicesx/kixdns
-#  用法（交互式，推荐）:
-#    bash <(curl -fsSL https://raw.githubusercontent.com/utada1stlove/kixdns-deploy/refs/heads/main/deploy.sh)
-#  或下载后执行:
-#    curl -fsSL https://raw.githubusercontent.com/utada1stlove/kixdns-deploy/refs/heads/main/deploy.sh \
-#      -o /tmp/kixdns.sh && bash /tmp/kixdns.sh
+#  用法:
+#    sudo bash deploy.sh
 # ============================================================
 
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'
@@ -38,8 +35,10 @@ confirm() {
 #  name|DoH URL|UDP addr|DoT URL
 # ============================================================
 DNS_PRESETS=(
-    "阿里 DNS|https://223.5.5.5/dns-query|223.5.5.5:53|dot://dns.alidns.com:853"
-    "腾讯 DNSPod|https://doh.pub/dns-query|119.29.29.29:53|"
+    "阿里 DNS|https://dns.alidns.com/dns-query|223.5.5.5:53|dot://dns.alidns.com:853"
+    "腾讯 DNSPod|https://doh.pub/dns-query|119.29.29.29:53|dot://dot.pub:853"
+    "清华 TUNA|https://dns.tuna.tsinghua.edu.cn/dns-query|101.6.6.6:53|"
+    "114 DNS||114.114.114.114:53|"
     "Cloudflare|https://cloudflare-dns.com/dns-query|1.1.1.1:53|dot://1.1.1.1:853"
     "Google|https://dns.google/dns-query|8.8.8.8:53|dot://8.8.8.8:853"
     "Quad9|https://dns.quad9.net/dns-query|9.9.9.9:53|dot://dns.quad9.net:853"
@@ -57,7 +56,7 @@ done
 # ============================================================
 check_root() {
     if [ "$(id -u)" -ne 0 ]; then
-        fail "请以 root 运行: sudo bash <(curl -fsSL https://raw.githubusercontent.com/<用户>/kixdns-deploy/refs/heads/main/deploy.sh)"
+        fail "请以 root 运行: sudo bash deploy.sh"
     fi
 }
 
@@ -69,7 +68,6 @@ detect_arch() {
         aarch64) BINARY="kixdns-linux-arm64-gnu"    ;;
         *)       fail "不支持的架构: $arch（仅支持 x86_64 / aarch64）" ;;
     esac
-    KIXDNS_URL="https://github.com/olicesx/kixdns/releases/download/v0.1.0/$BINARY"
     info "检测到架构: $arch → $BINARY"
 }
 
@@ -103,51 +101,139 @@ select_region() {
 }
 
 select_dns() {
-    local label="$1" varname_prefix="$2"
-
-    print_menu "选择 $label" "${DNS_NAMES[@]}" "自定义"
+    local items=("${DNS_NAMES[@]}" "自定义")
+    print_menu "选择上游 DNS（多选，多个用逗号或范围分隔，如 1,3,5 或 1-4）" "${items[@]}"
     local choice total=$(( ${#DNS_NAMES[@]} + 1 ))
-    read -rp "请输入数字 (1-$total): " choice
+    read -rp "请输入数字: " choice
 
-    if [ "$choice" -ge 1 ] 2>/dev/null && [ "$choice" -le "${#DNS_NAMES[@]}" ]; then
-        local idx=$((choice-1))
-        eval "${varname_prefix}_DOH='${DNS_DOHS[$idx]}'"
-        eval "${varname_prefix}_UDP='${DNS_UDPS[$idx]}'"
-        eval "${varname_prefix}_DOT='${DNS_DOTS[$idx]}'"
-        eval "${varname_prefix}_NAME='${DNS_NAMES[$idx]}'"
-        ok "$label: ${DNS_NAMES[$idx]}"
-    elif [ "$choice" = "$(( ${#DNS_NAMES[@]} + 1 ))" ]; then
-        echo "--- 自定义 $label ---"
-        read -rp "DoH URL（留空跳过）: " doh
-        read -rp "UDP 地址（留空跳过）: " udp
-        read -rp "DoT URL（留空跳过）: " dot
-        if [ -z "$doh" ] && [ -z "$udp" ]; then
-            fail "至少需要填写 DoH URL 或 UDP 地址"
+    local -a selected_indices=()
+    IFS=',' read -ra parts <<< "$choice"
+    for part in "${parts[@]}"; do
+        if [[ "$part" =~ ^([0-9]+)-([0-9]+)$ ]]; then
+            for ((i=10#${BASH_REMATCH[1]}; i<=10#${BASH_REMATCH[2]}; i++)); do
+                selected_indices+=("$i")
+            done
+        elif [[ "$part" =~ ^[0-9]+$ ]]; then
+            selected_indices+=("$part")
         fi
-        eval "${varname_prefix}_DOH='$doh'"
-        eval "${varname_prefix}_UDP='$udp'"
-        eval "${varname_prefix}_DOT='$dot'"
-        eval "${varname_prefix}_NAME='自定义'"
-    else
-        fail "输入无效"
+    done
+
+    local -a upstreams=()
+    local first_udp=""
+    local -a selected_names=()
+
+    for idx in "${selected_indices[@]}"; do
+        if [ "$idx" -eq "$total" ]; then
+            echo "--- 自定义 DNS ---"
+            read -rp "DoH URL（留空跳过）: " custom_doh
+            read -rp "UDP 地址（留空跳过）: " custom_udp
+            read -rp "DoT URL（留空跳过）: " custom_dot
+            if [ -n "$custom_doh" ]; then upstreams+=("$custom_doh"); fi
+            if [ -n "$custom_dot" ]; then upstreams+=("$custom_dot"); fi
+            if [ -n "$custom_udp" ]; then upstreams+=("$custom_udp"); fi
+            if [ ${#upstreams[@]} -eq 0 ]; then
+                fail "自定义上游至少需要一个 URL"
+            fi
+            selected_names+=("自定义")
+            [ -z "$first_udp" ] && [ -n "$custom_udp" ] && first_udp="$custom_udp"
+        elif [ "$idx" -ge 1 ] && [ "$idx" -le "${#DNS_NAMES[@]}" ]; then
+            local i=$((idx-1))
+            local doh="${DNS_DOHS[$i]}" dot="${DNS_DOTS[$i]}" udp="${DNS_UDPS[$i]}"
+            [ -n "$doh" ] && upstreams+=("$doh")
+            [ -n "$dot" ] && upstreams+=("$dot")
+            [ -n "$udp" ] && upstreams+=("$udp")
+            selected_names+=("${DNS_NAMES[$i]}")
+            [ -z "$first_udp" ] && [ -n "$udp" ] && first_udp="$udp"
+        fi
+    done
+
+    if [ ${#upstreams[@]} -eq 0 ]; then
+        fail "请至少选择一个有效的 DNS 上游"
     fi
+
+    local json_items=""
+    for u in "${upstreams[@]}"; do
+        json_items+="\"$u\","
+    done
+    json_items="${json_items%,}"
+    UPSTREAMS_JSON="[$json_items]"
+
+    if [ -z "$first_udp" ]; then
+        DEFAULT_UDP="${upstreams[0]}"
+    else
+        DEFAULT_UDP="$first_udp"
+    fi
+
+    local names_str=""
+    for n in "${selected_names[@]}"; do
+        names_str+="$n, "
+    done
+    SELECTED_NAMES="${names_str%, }"
+
+    ok "已选择: $SELECTED_NAMES"
 }
 
 # ============================================================
-#  下载二进制
+#  CDN 下载（带镜像回退）
 # ============================================================
+try_download() {
+    local dest="$1"; shift
+    for url in "$@"; do
+        if command -v wget &>/dev/null; then
+            if wget -q --timeout=15 "$url" -O "$dest" 2>/dev/null; then
+                return 0
+            fi
+        elif command -v curl &>/dev/null; then
+            if curl -fsSL --connect-timeout 15 "$url" -o "$dest" 2>/dev/null; then
+                return 0
+            fi
+        fi
+    done
+    return 1
+}
+
 download_binary() {
     info "下载 kixdns 二进制..."
-     mkdir -p /usr/local/bin
-    if command -v wget &>/dev/null; then
-         wget -q "$KIXDNS_URL" -O /usr/local/bin/kixdns
-    elif command -v curl &>/dev/null; then
-         curl -fsSL "$KIXDNS_URL" -o /usr/local/bin/kixdns
+    mkdir -p /usr/local/bin
+
+    local gh_url="https://github.com/olicesx/kixdns/releases/download/v0.1.0/$BINARY"
+    local urls=(
+        "https://mirror.ghproxy.com/$gh_url"
+        "https://gh-proxy.com/$gh_url"
+        "$gh_url"
+    )
+
+    if try_download /usr/local/bin/kixdns "${urls[@]}"; then
+        chmod +x /usr/local/bin/kixdns
+        ok "二进制已安装: /usr/local/bin/kixdns"
     else
-        fail "需要 wget 或 curl，请先安装"
+        fail "下载失败，请手动下载:\n  wget $gh_url -O /usr/local/bin/kixdns && chmod +x /usr/local/bin/kixdns"
     fi
-     chmod +x /usr/local/bin/kixdns
-    ok "二进制已安装: /usr/local/bin/kixdns"
+}
+
+download_geosite() {
+    local gh_url="https://github.com/v2fly/domain-list-community/releases/latest/download/dlc.dat"
+    local urls=(
+        "https://mirror.ghproxy.com/$gh_url"
+        "https://gh-proxy.com/$gh_url"
+        "https://cdn.jsdelivr.net/gh/v2fly/domain-list-community@release/dlc.dat"
+        "$gh_url"
+    )
+
+    if confirm "下载 geosite.dat (~10MB)？广告/恶意域名拦截需要此文件"; then
+        info "下载 geosite.dat ..."
+        if try_download /etc/kixdns/geosite.dat "${urls[@]}"; then
+            ok "geosite.dat 已下载"
+        else
+            warn "下载失败，请手动下载:"
+            echo "  sudo wget -O /etc/kixdns/geosite.dat \\"
+            echo "    $gh_url"
+        fi
+    else
+        warn "跳过 geosite.dat 下载。需要时运行："
+        echo "  sudo wget -O /etc/kixdns/geosite.dat \\"
+        echo "    $gh_url"
+    fi
 }
 
 # ============================================================
@@ -155,7 +241,7 @@ download_binary() {
 # ============================================================
 generate_config() {
     info "生成 /etc/kixdns/config.json ..."
-     mkdir -p /etc/kixdns
+    mkdir -p /etc/kixdns
 
     if [ "$REGION" = "cn" ]; then
         generate_cn_config
@@ -163,27 +249,21 @@ generate_config() {
         generate_global_config
     fi
 
-    # 替换占位符
-     sed -i "s|__PRIMARY_DOH__|${PRIMARY_DOH}|g" /etc/kixdns/config.json
-     sed -i "s|__PRIMARY_UDP__|${PRIMARY_UDP}|g" /etc/kixdns/config.json
-     sed -i "s|__PRIMARY_DOT__|${PRIMARY_DOT}|g" /etc/kixdns/config.json
-     sed -i "s|__FALLBACK_DOH__|${FALLBACK_DOH}|g" /etc/kixdns/config.json
-     sed -i "s|__FALLBACK_UDP__|${FALLBACK_UDP}|g" /etc/kixdns/config.json
-     sed -i "s|__FALLBACK_DOT__|${FALLBACK_DOT}|g" /etc/kixdns/config.json
+    sed -i "s|__UPSTREAMS__|${UPSTREAMS_JSON}|g" /etc/kixdns/config.json
+    sed -i "s|__DEFAULT_UDP__|${DEFAULT_UDP}|g" /etc/kixdns/config.json
 
-    # 清理空行占位：如果某个上游为空（如自定义没填），去掉对应的规则行
     ok "配置已生成: /etc/kixdns/config.json"
 }
 
 generate_cn_config() {
-     cat > /etc/kixdns/config.json << 'CNEOF'
+    cat > /etc/kixdns/config.json << 'CNEOF'
 {
   "version": "1.0",
   "settings": {
     "bind_udp": "0.0.0.0:8844",
     "bind_tcp": "0.0.0.0:8844",
     "min_ttl": 60,
-    "default_upstream": "__PRIMARY_UDP__",
+    "default_upstream": "__DEFAULT_UDP__",
     "upstream_timeout_ms": 3000,
     "request_timeout_ms": 9000,
     "response_jump_limit": 10,
@@ -217,11 +297,11 @@ generate_cn_config() {
     },
     {
       "pipeline": "blocked",
-      "matchers": [{ "type": "geosite", "value": "category-ads" }]
+      "matchers": [{ "type": "geo_site", "value": "category-ads" }]
     },
     {
       "pipeline": "blocked",
-      "matchers": [{ "type": "geosite", "value": "malware" }]
+      "matchers": [{ "type": "geo_site", "value": "malware" }]
     },
     {
       "pipeline": "sinkhole",
@@ -237,11 +317,11 @@ generate_cn_config() {
     },
     {
       "pipeline": "china_dns",
-      "matchers": [{ "type": "geosite", "value": "cn" }]
+      "matchers": [{ "type": "geo_site", "value": "cn" }]
     },
     {
       "pipeline": "international",
-      "matchers": [{ "type": "geosite_not", "value": "cn" }]
+      "matchers": [{ "type": "geo_site_not", "value": "cn" }]
     },
     {
       "pipeline": "default",
@@ -287,7 +367,7 @@ generate_cn_config() {
       "rules": [
         {
           "name": "internal-block-ads",
-          "matchers": [{ "type": "geosite", "value": "category-ads" }],
+          "matchers": [{ "type": "geo_site", "value": "category-ads" }],
           "actions": [
             { "type": "log", "level": "warn" },
             { "type": "deny" }
@@ -316,7 +396,7 @@ generate_cn_config() {
         },
         {
           "name": "internal-non-cn-fallback",
-          "matchers": [{ "type": "geosite_not", "value": "cn" }],
+          "matchers": [{ "type": "geo_site_not", "value": "cn" }],
           "actions": [{ "type": "forward", "upstream": null, "transport": "udp" }],
           "response_matchers": [
             { "type": "response_rcode", "value": "NOERROR" },
@@ -335,7 +415,7 @@ generate_cn_config() {
           "matchers": [{ "type": "any" }],
           "actions": [
             { "type": "log", "level": "debug" },
-            { "type": "forward", "upstream": "__PRIMARY_DOH__" }
+            { "type": "forward", "upstream": __UPSTREAMS__ }
           ],
           "response_matchers": [
             { "type": "response_rcode", "value": "NOERROR" },
@@ -350,7 +430,7 @@ generate_cn_config() {
           "matchers": [{ "type": "any" }],
           "actions": [
             { "type": "log", "level": "info" },
-            { "type": "forward", "upstream": ["__FALLBACK_DOH__", "__FALLBACK_UDP__"] }
+            { "type": "forward", "upstream": __UPSTREAMS__ }
           ],
           "response_matchers": [
             { "type": "response_rcode", "value": "NOERROR" },
@@ -368,7 +448,7 @@ generate_cn_config() {
           "name": "non-cn-primary",
           "matchers": [{ "type": "geoip_country", "country_codes": ["CN"] }],
           "actions": [
-            { "type": "forward", "upstream": "__PRIMARY_DOH__" }
+            { "type": "forward", "upstream": __UPSTREAMS__ }
           ],
           "response_matchers": [
             { "type": "response_rcode", "value": "NOERROR" },
@@ -381,7 +461,7 @@ generate_cn_config() {
           "name": "non-cn-fallback",
           "matchers": [{ "type": "any" }],
           "actions": [
-            { "type": "forward", "upstream": "__FALLBACK_DOH__" }
+            { "type": "forward", "upstream": __UPSTREAMS__ }
           ],
           "response_matchers": [
             { "type": "response_rcode", "value": "NOERROR" },
@@ -400,10 +480,10 @@ generate_cn_config() {
           "name": "default-cn-client-or-domain",
           "matchers": [
             { "type": "geoip_country", "country_codes": ["CN"] },
-            { "type": "geosite", "value": "cn", "operator": "or" }
+            { "type": "geo_site", "value": "cn", "operator": "or" }
           ],
           "actions": [
-            { "type": "forward", "upstream": "__PRIMARY_DOH__" }
+            { "type": "forward", "upstream": __UPSTREAMS__ }
           ],
           "response_matchers": [
             { "type": "response_rcode", "value": "NOERROR" },
@@ -418,7 +498,7 @@ generate_cn_config() {
           "matchers": [{ "type": "any" }],
           "actions": [
             { "type": "log", "level": "debug" },
-            { "type": "forward", "upstream": "__PRIMARY_DOH__" }
+            { "type": "forward", "upstream": __UPSTREAMS__ }
           ],
           "response_matchers": [
             { "type": "response_rcode", "value": "NOERROR" },
@@ -436,7 +516,7 @@ generate_cn_config() {
           "actions": [
             {
               "type": "forward",
-              "upstream": ["__FALLBACK_DOH__", "__FALLBACK_UDP__"]
+              "upstream": __UPSTREAMS__
             }
           ],
           "response_matchers": [
@@ -457,14 +537,14 @@ CNEOF
 }
 
 generate_global_config() {
-     cat > /etc/kixdns/config.json << 'GLOBALEOF'
+    cat > /etc/kixdns/config.json << 'GLOBALEOF'
 {
   "version": "1.0",
   "settings": {
     "bind_udp": "0.0.0.0:8844",
     "bind_tcp": "0.0.0.0:8844",
     "min_ttl": 30,
-    "default_upstream": "__PRIMARY_UDP__",
+    "default_upstream": "__DEFAULT_UDP__",
     "upstream_timeout_ms": 2000,
     "request_timeout_ms": 7500,
     "response_jump_limit": 10,
@@ -494,11 +574,11 @@ generate_global_config() {
   "pipeline_select": [
     {
       "pipeline": "blocked",
-      "matchers": [{ "type": "geosite", "value": "category-ads" }]
+      "matchers": [{ "type": "geo_site", "value": "category-ads" }]
     },
     {
       "pipeline": "blocked",
-      "matchers": [{ "type": "geosite", "value": "malware" }]
+      "matchers": [{ "type": "geo_site", "value": "malware" }]
     },
     {
       "pipeline": "sinkhole",
@@ -506,15 +586,15 @@ generate_global_config() {
     },
     {
       "pipeline": "trusted",
-      "matchers": [{ "type": "geosite", "value": "google" }]
+      "matchers": [{ "type": "geo_site", "value": "google" }]
     },
     {
       "pipeline": "china_dns",
-      "matchers": [{ "type": "geosite", "value": "cn" }]
+      "matchers": [{ "type": "geo_site", "value": "cn" }]
     },
     {
       "pipeline": "main",
-      "matchers": [{ "type": "geosite_not", "value": "cn" }]
+      "matchers": [{ "type": "geo_site_not", "value": "cn" }]
     },
     {
       "pipeline": "default",
@@ -554,7 +634,7 @@ generate_global_config() {
             { "type": "edns_present", "expect": true, "operator": "and" }
           ],
           "actions": [
-            { "type": "forward", "upstream": "__PRIMARY_DOH__" }
+            { "type": "forward", "upstream": __UPSTREAMS__ }
           ],
           "response_matchers": [
             { "type": "response_rcode", "value": "NOERROR" },
@@ -568,7 +648,7 @@ generate_global_config() {
           "actions": [
             {
               "type": "forward",
-              "upstream": ["__FALLBACK_DOH__", "__FALLBACK_UDP__"]
+              "upstream": __UPSTREAMS__
             }
           ],
           "response_matchers": [
@@ -587,7 +667,7 @@ generate_global_config() {
           "name": "cn-primary",
           "matchers": [{ "type": "any" }],
           "actions": [
-            { "type": "forward", "upstream": "__PRIMARY_DOH__" }
+            { "type": "forward", "upstream": __UPSTREAMS__ }
           ],
           "response_matchers": [
             { "type": "response_rcode", "value": "NOERROR" },
@@ -601,7 +681,7 @@ generate_global_config() {
           "name": "cn-fallback",
           "matchers": [{ "type": "any" }],
           "actions": [
-            { "type": "forward", "upstream": ["__FALLBACK_DOH__", "__FALLBACK_UDP__"] }
+            { "type": "forward", "upstream": __UPSTREAMS__ }
           ],
           "response_matchers": [
             { "type": "response_rcode", "value": "NOERROR" },
@@ -622,7 +702,7 @@ generate_global_config() {
             { "type": "geoip_country", "country_codes": ["CN"], "operator": "not" }
           ],
           "actions": [
-            { "type": "forward", "upstream": "__PRIMARY_DOH__" }
+            { "type": "forward", "upstream": __UPSTREAMS__ }
           ],
           "response_matchers": [
             { "type": "response_rcode", "value": "NOERROR" },
@@ -636,7 +716,7 @@ generate_global_config() {
           "name": "non-cn-fallback",
           "matchers": [{ "type": "any" }],
           "actions": [
-            { "type": "forward", "upstream": "__FALLBACK_DOH__" }
+            { "type": "forward", "upstream": __UPSTREAMS__ }
           ],
           "response_matchers": [
             { "type": "response_rcode", "value": "NOERROR" },
@@ -651,7 +731,7 @@ generate_global_config() {
           "actions": [
             {
               "type": "forward",
-              "upstream": ["__PRIMARY_DOH__", "__FALLBACK_UDP__"]
+              "upstream": __UPSTREAMS__
             }
           ],
           "response_matchers": [
@@ -670,10 +750,10 @@ generate_global_config() {
           "name": "default-cn-client-or-domain",
           "matchers": [
             { "type": "geoip_country", "country_codes": ["CN"] },
-            { "type": "geosite", "value": "cn", "operator": "or" }
+            { "type": "geo_site", "value": "cn", "operator": "or" }
           ],
           "actions": [
-            { "type": "forward", "upstream": "__PRIMARY_DOH__" }
+            { "type": "forward", "upstream": __UPSTREAMS__ }
           ],
           "response_matchers": [
             { "type": "response_rcode", "value": "NOERROR" },
@@ -688,7 +768,7 @@ generate_global_config() {
           "matchers": [{ "type": "any" }],
           "actions": [
             { "type": "log", "level": "debug" },
-            { "type": "forward", "upstream": "__PRIMARY_DOH__" }
+            { "type": "forward", "upstream": __UPSTREAMS__ }
           ],
           "response_matchers": [
             { "type": "response_rcode", "value": "NOERROR" },
@@ -706,7 +786,7 @@ generate_global_config() {
           "actions": [
             {
               "type": "forward",
-              "upstream": ["__FALLBACK_DOH__", "__FALLBACK_UDP__"]
+              "upstream": __UPSTREAMS__
             }
           ],
           "response_matchers": [
@@ -727,27 +807,11 @@ GLOBALEOF
 }
 
 # ============================================================
-#  geosite 数据下载
-# ============================================================
-download_geosite() {
-    if confirm "下载 geosite.dat (~10MB)？广告/恶意域名拦截需要此文件"; then
-        info "下载 geosite.dat ..."
-         wget -q -O /etc/kixdns/geosite.dat \
-            https://github.com/v2fly/domain-list-community/releases/latest/download/dlc.dat
-        ok "geosite.dat 已下载"
-    else
-        warn "跳过 geosite.dat 下载。需要时运行："
-        echo "  sudo wget -O /etc/kixdns/geosite.dat \\"
-        echo "    https://github.com/v2fly/domain-list-community/releases/latest/download/dlc.dat"
-    fi
-}
-
-# ============================================================
 #  systemd 服务
 # ============================================================
 setup_systemd() {
     info "配置 systemd 服务..."
-     cat > /etc/systemd/system/kixdns.service << UNIT
+    cat > /etc/systemd/system/kixdns.service << UNIT
 [Unit]
 Description=KixDNS DNS Forwarder
 Wants=network-online.target
@@ -765,10 +829,53 @@ Environment=RUST_LOG=info
 WantedBy=multi-user.target
 UNIT
 
-     systemctl daemon-reload
-     systemctl enable kixdns
-     systemctl start kixdns
+    systemctl daemon-reload
+    systemctl enable kixdns
+    systemctl start kixdns
     ok "systemd 服务已启用并启动"
+}
+
+# ============================================================
+#  卸载
+# ============================================================
+uninstall() {
+    echo ""
+    echo "========================================"
+    echo "  卸载 KixDNS"
+    echo "========================================"
+
+    if ! confirm "确认卸载 KixDNS？" "N"; then
+        info "已取消"
+        exit 0
+    fi
+
+    if systemctl is-active --quiet kixdns 2>/dev/null; then
+        info "停止 kixdns 服务..."
+        systemctl stop kixdns
+    fi
+    if systemctl is-enabled --quiet kixdns 2>/dev/null; then
+        systemctl disable kixdns
+    fi
+
+    rm -f /etc/systemd/system/kixdns.service
+    systemctl daemon-reload
+    ok "systemd 服务已移除"
+
+    if [ -f /usr/local/bin/kixdns ]; then
+        rm -f /usr/local/bin/kixdns
+        ok "二进制已删除: /usr/local/bin/kixdns"
+    fi
+
+    if confirm "删除配置文件？(/etc/kixdns/)"; then
+        rm -rf /etc/kixdns/
+        ok "配置文件已删除"
+    fi
+
+    echo ""
+    echo "========================================"
+    echo -e "  ${GREEN}KixDNS 已卸载${NC}"
+    echo "========================================"
+    echo ""
 }
 
 # ============================================================
@@ -781,11 +888,11 @@ verify() {
     echo "========================================"
     sleep 2
 
-    if  systemctl is-active --quiet kixdns; then
+    if systemctl is-active --quiet kixdns; then
         ok "kixdns 服务运行中"
     else
         warn "kixdns 服务未运行，检查日志："
-         journalctl -u kixdns -n 20 --no-pager
+        journalctl -u kixdns -n 20 --no-pager
         return 1
     fi
 
@@ -829,18 +936,28 @@ main() {
     echo ""
 
     check_root
+
+    local items=("安装 KixDNS" "卸载 KixDNS" "退出")
+    print_menu "请选择操作" "${items[@]}"
+    local action
+    read -rp "请输入数字 (1-3): " action
+
+    case "$action" in
+        1) : ;; # 继续安装
+        2) uninstall; exit 0 ;;
+        *) info "已退出"; exit 0 ;;
+    esac
+
     detect_arch
     select_region
-    select_dns "主上游 DNS" "PRIMARY"
-    select_dns "兜底 DNS" "FALLBACK"
+    select_dns
 
     echo ""
     echo "========================================"
     echo "  配置摘要"
     echo "========================================"
     echo "  版本:     $( [ "$REGION" = "cn" ] && echo '国内版' || echo '海外版' )"
-    echo "  主上游:   $PRIMARY_NAME ($PRIMARY_DOH)"
-    echo "  兜底:     $FALLBACK_NAME ($FALLBACK_DOH)"
+    echo "  上游 DNS: $SELECTED_NAMES"
     echo "  监听:     0.0.0.0:8844"
     echo ""
 
